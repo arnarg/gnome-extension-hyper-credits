@@ -1,0 +1,58 @@
+.hyper-credits-panel-box {
+    spacing: 4px;
+}
+
+.hyper-credits-panel-label {
+    font-weight: 600;
+}
+
+.hyper-credits-menu-balance {
+    font-size: 1.2em;
+    font-weight: 700;
+}
+
+.hyper-credits-menu-subtitle {
+    color: #9a9a9a;
+    font-size: 0.9em;
+}
+
+.hyper-credits-menu-error {
+    color: #ff6b6b;
+    font-size: 0.9em;
+}
+
+.hyper-credits-menu-footer {
+    color: #9a9a9a;
+    font-size: 0.85em;
+}
+
+.hyper-credits-menu-button {
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.hyper-credits-menu-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.hyper-credits-device-code {
+    font-family: monospace;
+    font-size: 1.4em;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 8px 0;
+}
+
+.hyper-credits-device-buttons {
+    spacing: 8px;
+}
+
+.hyper-credits-action-button {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.hyper-credits-action-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}

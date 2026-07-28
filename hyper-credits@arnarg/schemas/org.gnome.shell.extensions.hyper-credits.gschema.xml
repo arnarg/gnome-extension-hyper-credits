@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.hyper-credits"
+          path="/org/gnome/shell/extensions/hyper-credits/">
+
+    <key name="refresh-interval" type="u">
+      <default>300</default>
+      <summary>Refresh interval in seconds</summary>
+      <description>How often to poll the Hyper credits endpoint.</description>
+    </key>
+
+    <key name="refresh-on-menu-open" type="b">
+      <default>true</default>
+      <summary>Refresh when the menu is opened</summary>
+      <description>Fetch the latest balance every time the dropdown menu opens.</description>
+    </key>
+
+    <key name="show-gem" type="b">
+      <default>true</default>
+      <summary>Show gem icon in panel</summary>
+      <description>Whether to prefix the balance with the gem character.</description>
+    </key>
+
+    <key name="compact-numbers" type="b">
+      <default>false</default>
+      <summary>Use compact number formatting</summary>
+      <description>Format large balances as 1.2K, 3.4M, etc.</description>
+    </key>
+
+    <key name="colored-label" type="b">
+      <default>true</default>
+      <summary>Color the panel label</summary>
+      <description>Tint the panel label magenta, matching the Hyper gem color.</description>
+    </key>
+
+    <key name="low-balance-threshold" type="u">
+      <default>0</default>
+      <summary>Low balance notification threshold</summary>
+      <description>Notify when the balance drops at or below this many credits. 0 disables the notification.</description>
+    </key>
+
+    <key name="api-base-url" type="s">
+      <default>''</default>
+      <summary>Custom API base URL</summary>
+      <description>Override the Hyper API base URL. Empty means https://hyper.charm.land.</description>
+    </key>
+
+  </schema>
+</schemalist>
