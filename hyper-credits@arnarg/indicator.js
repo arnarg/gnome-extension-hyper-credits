@@ -33,7 +33,7 @@ function formatClock(date) {
 export const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
     _init(extension) {
-        super._init(0.0, 'Hyper Credits', false);
+        super._init(0.5, 'Hyper Credits', false);
 
         this._extension = extension;
         this._settings = extension.getSettings();
@@ -59,7 +59,6 @@ class Indicator extends PanelMenu.Button {
         this._label = new St.Label({
             text: `${GEM} …`,
             y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'hyper-credits-panel-label',
         });
         box.add_child(this._label);
         this.add_child(box);
