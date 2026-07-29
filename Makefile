@@ -7,6 +7,8 @@ build: schemas
 		--extra-source=credentialsStore.js \
 		--extra-source=hyperClient.js \
 		--extra-source=indicator.js \
+		--extra-source=panel-gem.png \
+		--extra-source=gem \
 		./hyper-credits@arnarg/ \
 		--out-dir=./dist
 

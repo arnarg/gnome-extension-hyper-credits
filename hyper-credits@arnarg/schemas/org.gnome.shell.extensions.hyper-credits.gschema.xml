@@ -27,12 +27,6 @@
       <description>Format large balances as 1.2K, 3.4M, etc.</description>
     </key>
 
-    <key name="color-mode" type="s">
-      <default>'all'</default>
-      <summary>What to tint magenta in the panel</summary>
-      <description>One of 'all', 'gem-only', or 'none'.</description>
-    </key>
-
     <key name="low-balance-threshold" type="u">
       <default>0</default>
       <summary>Low balance notification threshold</summary>

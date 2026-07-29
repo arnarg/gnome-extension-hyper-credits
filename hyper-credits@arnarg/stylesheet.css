@@ -1,9 +1,13 @@
 .hyper-credits-panel-box {
-    spacing: 4px;
+    spacing: 8px;
+}
+
+.hyper-credits-menu-balance-box {
+    spacing: 14px;
 }
 
 .hyper-credits-menu-balance {
-    font-size: 1.2em;
+    font-size: 3em;
     font-weight: 700;
 }
 

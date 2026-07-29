@@ -17,12 +17,6 @@ const DISPLAY_MODES = [
     { label: 'Number only', value: 'number-only' },
 ];
 
-const COLOR_MODES = [
-    { label: 'All magenta', value: 'all' },
-    { label: 'Gem only magenta', value: 'gem-only' },
-    { label: 'No magenta', value: 'none' },
-];
-
 export default class HyperCreditsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
@@ -71,26 +65,6 @@ export default class HyperCreditsPreferences extends ExtensionPreferences {
                 settings.set_string('display-mode', entry.value);
         });
         group.add(displayRow);
-
-        const colorRow = new Adw.ComboRow({
-            title: 'Color',
-            subtitle: 'What to tint magenta in the top bar',
-        });
-        const colorModel = new Gtk.StringList();
-        for (const entry of COLOR_MODES)
-            colorModel.append(entry.label);
-        colorRow.model = colorModel;
-
-        const currentColor = settings.get_string('color-mode');
-        const currentColorIndex = Math.max(0,
-            COLOR_MODES.findIndex(e => e.value === currentColor));
-        colorRow.selected = currentColorIndex;
-        colorRow.connect('notify::selected', () => {
-            const entry = COLOR_MODES[colorRow.selected];
-            if (entry)
-                settings.set_string('color-mode', entry.value);
-        });
-        group.add(colorRow);
 
         const compactRow = new Adw.SwitchRow({
             title: 'Compact numbers',
