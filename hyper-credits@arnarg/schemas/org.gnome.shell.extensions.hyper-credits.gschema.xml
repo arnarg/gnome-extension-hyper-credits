@@ -15,10 +15,10 @@
       <description>Fetch the latest balance every time the dropdown menu opens.</description>
     </key>
 
-    <key name="show-gem" type="b">
-      <default>true</default>
-      <summary>Show gem icon in panel</summary>
-      <description>Whether to prefix the balance with the gem character.</description>
+    <key name="display-mode" type="s">
+      <default>'both'</default>
+      <summary>What to display in the panel</summary>
+      <description>One of 'both', 'gem-only', or 'number-only'.</description>
     </key>
 
     <key name="compact-numbers" type="b">
@@ -27,10 +27,10 @@
       <description>Format large balances as 1.2K, 3.4M, etc.</description>
     </key>
 
-    <key name="colored-label" type="b">
-      <default>true</default>
-      <summary>Color the panel label</summary>
-      <description>Tint the panel label magenta, matching the Hyper gem color.</description>
+    <key name="color-mode" type="s">
+      <default>'all'</default>
+      <summary>What to tint magenta in the panel</summary>
+      <description>One of 'all', 'gem-only', or 'none'.</description>
     </key>
 
     <key name="low-balance-threshold" type="u">

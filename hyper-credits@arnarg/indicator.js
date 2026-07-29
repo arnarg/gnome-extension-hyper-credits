@@ -56,11 +56,16 @@ class Indicator extends PanelMenu.Button {
         this._lowBalanceNotified = false;
 
         const box = new St.BoxLayout({ style_class: 'hyper-credits-panel-box' });
-        this._label = new St.Label({
-            text: `${GEM} …`,
+        this._gemLabel = new St.Label({
+            text: GEM,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        box.add_child(this._label);
+        this._numberLabel = new St.Label({
+            text: '…',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        box.add_child(this._gemLabel);
+        box.add_child(this._numberLabel);
         this.add_child(box);
 
         this._applyLabelStyle();
@@ -69,13 +74,11 @@ class Indicator extends PanelMenu.Button {
         this._settingsSignals = [
             this._settings.connect('changed::refresh-interval',
                 () => this._startRefreshLoop()),
-            this._settings.connect('changed::show-gem',
-                () => this._renderPanelLabel()),
-            this._settings.connect('changed::show-suffix',
+            this._settings.connect('changed::display-mode',
                 () => this._renderPanelLabel()),
             this._settings.connect('changed::compact-numbers',
                 () => this._renderPanelLabel()),
-            this._settings.connect('changed::colored-label',
+            this._settings.connect('changed::color-mode',
                 () => this._applyLabelStyle()),
             this._settings.connect('changed::api-base-url', () => {
                 this._client.destroy();
@@ -207,9 +210,8 @@ class Indicator extends PanelMenu.Button {
 
     _setError(message) {
         this._lastError = message;
-        if (this._balance === null) {
-            this._label.text = `${GEM} !`;
-        }
+        if (this._balance === null)
+            this._numberLabel.text = '!';
         this._rebuildMenu();
     }
 
@@ -223,7 +225,7 @@ class Indicator extends PanelMenu.Button {
     }
 
     _renderPanelLabel() {
-        const showGem = this._settings.get_boolean('show-gem');
+        const displayMode = this._settings.get_string('display-mode');
         const compact = this._settings.get_boolean('compact-numbers');
 
         let text;
@@ -235,12 +237,22 @@ class Indicator extends PanelMenu.Button {
             text = formatBalance(this._balance, compact);
         }
 
-        this._label.text = showGem ? `${GEM} ${text}` : text;
+        this._numberLabel.text = text;
+
+        this._gemLabel.visible = displayMode !== 'number-only';
+        this._numberLabel.visible = displayMode !== 'gem-only';
+
+        this._applyLabelStyle();
     }
 
     _applyLabelStyle() {
-        const colored = this._settings.get_boolean('colored-label');
-        this._label.style = colored ? `color: ${MAGENTA};` : null;
+        const colorMode = this._settings.get_string('color-mode');
+        const gemStyle = (colorMode === 'all' || colorMode === 'gem-only')
+            ? `color: ${MAGENTA};` : null;
+        const numberStyle = colorMode === 'all'
+            ? `color: ${MAGENTA};` : null;
+        this._gemLabel.style = gemStyle;
+        this._numberLabel.style = numberStyle;
     }
 
     _maybeNotifyLowBalance(balance) {

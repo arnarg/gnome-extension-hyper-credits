@@ -11,6 +11,18 @@ const INTERVALS = [
     { label: '15 minutes', value: 900 },
 ];
 
+const DISPLAY_MODES = [
+    { label: 'Gem and number', value: 'both' },
+    { label: 'Gem only', value: 'gem-only' },
+    { label: 'Number only', value: 'number-only' },
+];
+
+const COLOR_MODES = [
+    { label: 'All magenta', value: 'all' },
+    { label: 'Gem only magenta', value: 'gem-only' },
+    { label: 'No magenta', value: 'none' },
+];
+
 export default class HyperCreditsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
@@ -40,19 +52,45 @@ export default class HyperCreditsPreferences extends ExtensionPreferences {
         });
         page.add(group);
 
-        const gemRow = new Adw.SwitchRow({
-            title: 'Show gem icon',
-            subtitle: 'Prefix the balance with ◆',
+        const displayRow = new Adw.ComboRow({
+            title: 'Display',
+            subtitle: 'What to show in the top bar',
         });
-        settings.bind('show-gem', gemRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        group.add(gemRow);
+        const displayModel = new Gtk.StringList();
+        for (const entry of DISPLAY_MODES)
+            displayModel.append(entry.label);
+        displayRow.model = displayModel;
 
-        const coloredRow = new Adw.SwitchRow({
-            title: 'Colored label',
-            subtitle: 'Tint the panel label magenta',
+        const currentDisplay = settings.get_string('display-mode');
+        const currentDisplayIndex = Math.max(0,
+            DISPLAY_MODES.findIndex(e => e.value === currentDisplay));
+        displayRow.selected = currentDisplayIndex;
+        displayRow.connect('notify::selected', () => {
+            const entry = DISPLAY_MODES[displayRow.selected];
+            if (entry)
+                settings.set_string('display-mode', entry.value);
         });
-        settings.bind('colored-label', coloredRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        group.add(coloredRow);
+        group.add(displayRow);
+
+        const colorRow = new Adw.ComboRow({
+            title: 'Color',
+            subtitle: 'What to tint magenta in the top bar',
+        });
+        const colorModel = new Gtk.StringList();
+        for (const entry of COLOR_MODES)
+            colorModel.append(entry.label);
+        colorRow.model = colorModel;
+
+        const currentColor = settings.get_string('color-mode');
+        const currentColorIndex = Math.max(0,
+            COLOR_MODES.findIndex(e => e.value === currentColor));
+        colorRow.selected = currentColorIndex;
+        colorRow.connect('notify::selected', () => {
+            const entry = COLOR_MODES[colorRow.selected];
+            if (entry)
+                settings.set_string('color-mode', entry.value);
+        });
+        group.add(colorRow);
 
         const compactRow = new Adw.SwitchRow({
             title: 'Compact numbers',

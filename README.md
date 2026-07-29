@@ -55,8 +55,8 @@ Available options:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| Show gem icon | on | Prefix the balance with `◆` |
-| Colored label | on | Tint the panel label magenta |
+| Display | Gem and number | What to show in the top bar: gem and number, gem only, or number only |
+| Color | All magenta | What to tint magenta: everything, gem only, or nothing |
 | Compact numbers | off | Format large balances as `1.2K`, `3.4M` |
 | Refresh interval | 5 minutes | How often to poll the credits endpoint |
 | Refresh on menu open | on | Also refresh every time the menu opens |
