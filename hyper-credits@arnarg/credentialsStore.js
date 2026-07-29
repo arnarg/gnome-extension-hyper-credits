@@ -6,10 +6,17 @@ const SERVICE = 'hyper-credits';
 const ACCOUNT = 'oauth';
 const LABEL = 'Charm Hyper OAuth credentials';
 
-const SCHEMA = new Secret.Schema('land.charm.Hyper.Credentials', Secret.SchemaFlags.NONE, {
-    service: Secret.SchemaAttributeType.STRING,
-    account: Secret.SchemaAttributeType.STRING,
-});
+let _schema = null;
+
+function getSchema() {
+    if (!_schema) {
+        _schema = new Secret.Schema('land.charm.Hyper.Credentials', Secret.SchemaFlags.NONE, {
+            service: Secret.SchemaAttributeType.STRING,
+            account: Secret.SchemaAttributeType.STRING,
+        });
+    }
+    return _schema;
+}
 
 const ATTRIBUTES = { service: SERVICE, account: ACCOUNT };
 
@@ -21,7 +28,7 @@ function fallbackPath() {
 
 async function secretStore(payload) {
     return new Promise((resolve, reject) => {
-        Secret.password_store(SCHEMA, ATTRIBUTES, Secret.COLLECTION_DEFAULT,
+        Secret.password_store(getSchema(), ATTRIBUTES, Secret.COLLECTION_DEFAULT,
             LABEL, payload, null, (_source, result) => {
                 try {
                     Secret.password_store_finish(result);
@@ -35,7 +42,7 @@ async function secretStore(payload) {
 
 async function secretLookup() {
     return new Promise((resolve, reject) => {
-        Secret.password_lookup(SCHEMA, ATTRIBUTES, null, (_source, result) => {
+        Secret.password_lookup(getSchema(), ATTRIBUTES, null, (_source, result) => {
             try {
                 resolve(Secret.password_lookup_finish(result));
             } catch (e) {
@@ -47,7 +54,7 @@ async function secretLookup() {
 
 async function secretClear() {
     return new Promise((resolve, reject) => {
-        Secret.password_clear(SCHEMA, ATTRIBUTES, null, (_source, result) => {
+        Secret.password_clear(getSchema(), ATTRIBUTES, null, (_source, result) => {
             try {
                 resolve(Secret.password_clear_finish(result));
             } catch (e) {
@@ -57,31 +64,59 @@ async function secretClear() {
     });
 }
 
-function fileStore(payload) {
+async function fileStore(payload) {
     const path = fallbackPath();
     const dir = GLib.path_get_dirname(path);
     GLib.mkdir_with_parents(dir, 0o700);
 
     const file = Gio.File.new_for_path(path);
-    file.replace_contents(payload, null, false,
-        Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+    return new Promise((resolve, reject) => {
+        file.replace_contents_async(payload, null, false,
+            Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null, (_source, result) => {
+                try {
+                    file.replace_contents_finish(result);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            });
+    });
 }
 
-function fileLookup() {
+async function fileLookup() {
     const path = fallbackPath();
     if (!GLib.file_test(path, GLib.FileTest.EXISTS))
         return null;
 
     const file = Gio.File.new_for_path(path);
-    const [, bytes] = file.load_contents(null);
-    return new TextDecoder('utf-8').decode(bytes);
+    return new Promise((resolve, reject) => {
+        file.load_contents_async(null, (_source, result) => {
+            try {
+                const [, bytes] = file.load_contents_finish(result);
+                resolve(new TextDecoder('utf-8').decode(bytes));
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
 }
 
-function fileClear() {
+async function fileClear() {
     const path = fallbackPath();
     if (!GLib.file_test(path, GLib.FileTest.EXISTS))
         return;
-    Gio.File.new_for_path(path).delete(null);
+
+    const file = Gio.File.new_for_path(path);
+    return new Promise((resolve, reject) => {
+        file.delete_async(GLib.PRIORITY_DEFAULT, null, (_source, result) => {
+            try {
+                file.delete_finish(result);
+                resolve();
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
 }
 
 function serialize(credentials) {
@@ -136,7 +171,7 @@ export class CredentialsStore {
                 this._useSecret = false;
             }
         }
-        fileStore(payload);
+        await fileStore(payload);
     }
 
     async load() {
@@ -151,7 +186,7 @@ export class CredentialsStore {
             }
         }
         try {
-            return deserialize(fileLookup());
+            return deserialize(await fileLookup());
         } catch (e) {
             log(`hyper-credits: credential file read failed: ${e.message}`);
             return null;
@@ -167,7 +202,7 @@ export class CredentialsStore {
             }
         }
         try {
-            fileClear();
+            await fileClear();
         } catch {
             // best effort
         }
