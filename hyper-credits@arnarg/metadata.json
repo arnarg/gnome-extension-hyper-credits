@@ -5,5 +5,5 @@
   "version": 3,
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "settings-schema": "org.gnome.shell.extensions.hyper-credits",
-  "url": "https://github.com/arnarg/hyper-credits-gnome-extension"
+  "url": "https://github.com/arnarg/gnome-extension-hyper-credits"
 }
