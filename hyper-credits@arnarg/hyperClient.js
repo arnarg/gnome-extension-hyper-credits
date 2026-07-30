@@ -213,11 +213,16 @@ export class DeviceFlow {
     this._onUpdate = onUpdate;
     this._cancelled = false;
     this._timerId = 0;
+    this._rejectSleep = null;
   }
 
   cancel() {
     this._cancelled = true;
     this._clearTimer();
+    // Reject any in-flight _sleep so run() unwinds immediately instead of
+    // parking on a promise whose timer was just removed.
+    this._rejectSleep?.(new HyperError('Sign-in cancelled', 'cancelled'));
+    this._rejectSleep = null;
   }
 
   _clearTimer() {
@@ -276,9 +281,11 @@ export class DeviceFlow {
   }
 
   _sleep(ms) {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+      this._rejectSleep = reject;
       this._timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(ms), () => {
         this._timerId = 0;
+        this._rejectSleep = null;
         resolve();
         return GLib.SOURCE_REMOVE;
       });

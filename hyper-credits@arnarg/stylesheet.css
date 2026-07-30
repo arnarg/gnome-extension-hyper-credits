@@ -1,41 +1,51 @@
-.hyper-credits-panel-box {
+.hc-panel-box {
     spacing: 8px;
 }
 
-.hyper-credits-menu-balance-box {
+/* Each screen is one non-reactive menu item; this restores the vertical
+   rhythm the shell gave us when screens were separate PopupMenuItems. */
+.hc-screen {
+    spacing: 8px;
+}
+
+.hc-menu-balance-box {
     spacing: 14px;
 }
 
-.hyper-credits-menu-balance {
+.hc-menu-balance {
     font-size: 3em;
     font-weight: 700;
 }
 
-.hyper-credits-menu-subtitle {
+.hc-menu-subtitle {
     color: #9a9a9a;
     font-size: 0.9em;
 }
 
-.hyper-credits-menu-error {
+.hc-menu-error {
     color: #ff6b6b;
     font-size: 0.9em;
 }
 
-.hyper-credits-menu-footer {
+.hc-menu-footer-row {
+    spacing: 4px;
+}
+
+.hc-menu-footer {
     color: #9a9a9a;
     font-size: 0.85em;
 }
 
-.hyper-credits-menu-button {
+.hc-menu-button {
     padding: 4px 8px;
     border-radius: 6px;
 }
 
-.hyper-credits-menu-button:hover {
+.hc-menu-button:hover {
     background-color: rgba(255, 255, 255, 0.08);
 }
 
-.hyper-credits-device-code {
+.hc-device-code {
     font-family: monospace;
     font-size: 1.4em;
     font-weight: 700;
@@ -43,16 +53,27 @@
     padding: 8px 0;
 }
 
-.hyper-credits-device-buttons {
+.hc-device-buttons {
     spacing: 8px;
 }
 
-.hyper-credits-action-button {
+.hc-action-button {
     padding: 6px 10px;
     border-radius: 6px;
     background-color: rgba(255, 255, 255, 0.06);
 }
 
-.hyper-credits-action-button:hover {
+.hc-action-button:hover {
     background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Full-width row button with the shell's popup menu item look (used for
+   Cancel on the sign-in screen). */
+.hc-row-button {
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+.hc-row-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
 }

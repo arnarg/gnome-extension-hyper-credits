@@ -39,5 +39,11 @@
       <description>Override the Hyper API base URL. Empty means https://hyper.charm.land.</description>
     </key>
 
+    <key name="debug-balance" type="i">
+      <default>-1</default>
+      <summary>Debug balance override</summary>
+      <description>When >= 0, skip sign-in and network fetches and render this value as the balance. For development and theme testing; -1 disables. Not exposed in preferences.</description>
+    </key>
+
   </schema>
 </schemalist>

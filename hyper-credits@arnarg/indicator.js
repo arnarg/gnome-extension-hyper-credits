@@ -2,37 +2,19 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
-import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import { HyperClient, DeviceFlow, HyperError } from './hyperClient.js';
 import { CredentialsStore } from './credentialsStore.js';
+import { GemSpinner } from './gemSpinner.js';
+import { buildMainScreen, buildSignedOutScreen, buildSignInScreen } from './screens.js';
+import { formatBalance, formatClock } from './format.js';
 
-const GEM = '\u25C6';
-
-const FRAME_COUNT = 42;
-const FRAME_DURATION_MS = 66;
 const MENU_GEM_ICON_SIZE = 40;
 const PANEL_GEM_ICON_SIZE = 16;
-
-function formatBalance(balance, compact) {
-  const options = compact
-    ? { notation: 'compact', maximumFractionDigits: 1 }
-    : Number.isInteger(balance)
-      ? {}
-      : { maximumFractionDigits: 2 };
-  return new Intl.NumberFormat(undefined, options).format(balance);
-}
-
-function formatClock(date) {
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
-}
 
 export const Indicator = GObject.registerClass(
   class Indicator extends PanelMenu.Button {
@@ -46,7 +28,7 @@ export const Indicator = GObject.registerClass(
       });
       this._store = new CredentialsStore();
 
-      this._state = 'loading';
+      this._state = 'signedOut';
       this._credentials = null;
       this._balance = null;
       this._lastError = null;
@@ -59,33 +41,54 @@ export const Indicator = GObject.registerClass(
       this._refreshInFlight = false;
       this._lowBalanceNotified = false;
 
-      this._gemFrames = this._loadGemFrames();
-      this._gemIcon = null;
-      this._gemAnimTimerId = 0;
-
-      const box = new St.BoxLayout({ style_class: 'hyper-credits-panel-box' });
-      const panelGemGicon = this._loadPanelGem();
-      if (panelGemGicon) {
-        this._gemLabel = new St.Icon({
-          gicon: panelGemGicon,
-          icon_size: PANEL_GEM_ICON_SIZE,
-          y_align: Clutter.ActorAlign.CENTER,
-        });
-      } else {
-        this._gemLabel = new St.Label({
-          text: GEM,
-          y_align: Clutter.ActorAlign.CENTER,
-        });
-      }
-      this._numberLabel = new St.Label({
-        text: '…',
+      // ---- panel: built once; only text and visibility ever change ----
+      const box = new St.BoxLayout({ style_class: 'hc-panel-box' });
+      this._panelGem = new St.Icon({
+        gicon: new Gio.FileIcon({ file: extension.dir.get_child('panel-gem.png') }),
+        icon_size: PANEL_GEM_ICON_SIZE,
         y_align: Clutter.ActorAlign.CENTER,
       });
-      box.add_child(this._gemLabel);
+      this._numberLabel = new St.Label({
+        text: '--',
+        y_align: Clutter.ActorAlign.CENTER,
+      });
+      box.add_child(this._panelGem);
       box.add_child(this._numberLabel);
       this.add_child(box);
 
-      this._rebuildMenu();
+      // ---- menu screens: built once, swapped by visibility ----
+      this._spinner = new GemSpinner(extension.dir, MENU_GEM_ICON_SIZE);
+      const closeAnd = fn => () => {
+        this.menu.close();
+        fn();
+      };
+
+      this._mainScreen = buildMainScreen({
+        spinner: this._spinner,
+        onOpenDashboard: () => this._openDashboard(),
+        onRefresh: () => this._refresh(),
+        onSignOut: closeAnd(() => this._signOut()),
+        onOpenPrefs: closeAnd(() => extension.openPreferences()),
+      });
+      this._signedOutScreen = buildSignedOutScreen({
+        onSignIn: () => this._startSignIn(),
+        onOpenPrefs: closeAnd(() => extension.openPreferences()),
+      });
+      this._signInScreen = buildSignInScreen({
+        onCopyCode: () => this._copyDeviceCode(),
+        onOpenBrowser: () => this._openVerificationUrl(),
+        onCancel: () => this._cancelSignIn(),
+      });
+
+      this._screens = {
+        signedIn: this._mainScreen.items,
+        signedOut: this._signedOutScreen.items,
+        signingIn: this._signInScreen.items,
+      };
+      for (const items of Object.values(this._screens))
+        for (const item of items)
+          this.menu.addMenuItem(item);
+      this._applyState();
 
       this._settingsSignals = [
         this._settings.connect('changed::refresh-interval',
@@ -101,15 +104,21 @@ export const Indicator = GObject.registerClass(
           });
           this._refresh();
         }),
+        this._settings.connect('changed::debug-balance', () => {
+          if (this._applyDebugBalance())
+            return;
+          // Debug mode was just turned off: re-run normal initialization.
+          this._initialize();
+        }),
       ];
 
       this._menuOpenSignal = this.menu.connect('open-state-changed', (_menu, isOpen) => {
         if (isOpen && this._settings.get_boolean('refresh-on-menu-open'))
           this._refresh();
-        if (isOpen)
-          this._spinGemOnce();
+        if (isOpen && this._state === 'signedIn')
+          this._spinner.spinOnce();
         else
-          this._stopGemSpin();
+          this._spinner.stop();
       });
 
       this.connect('destroy', () => this._onDestroy());
@@ -118,20 +127,41 @@ export const Indicator = GObject.registerClass(
     }
 
     async _initialize() {
+      // Debug mode: render a fixed balance without sign-in or network, for
+      // development and theme testing.
+      if (this._applyDebugBalance())
+        return;
+
       this._credentials = await this._store.load();
       if (this._destroyed)
         return;
-      this._state = this._credentials ? 'signedIn' : 'signedOut';
-      this._renderPanelLabel();
-      this._rebuildMenu();
-      this._startRefreshLoop();
-      if (this._state === 'signedIn')
+      if (this._credentials) {
+        this._state = 'signedIn';
+        this._applyState();
+        this._startRefreshLoop();
         this._refresh();
+      } else {
+        this._applyState();
+      }
+    }
+
+    // Pushes the debug-balance setting through the normal render path when
+    // it is >= 0. Returns true while debug mode is active so callers skip
+    // credentials, refresh loops, and fetches.
+    _applyDebugBalance() {
+      const debugBalance = this._settings.get_int('debug-balance');
+      if (debugBalance < 0)
+        return false;
+      this._state = 'signedIn';
+      this._onBalance(debugBalance);
+      return true;
     }
 
     _startRefreshLoop() {
       this._stopRefreshLoop();
       if (this._state !== 'signedIn')
+        return;
+      if (this._settings.get_int('debug-balance') >= 0)
         return;
       const interval = this._settings.get_uint('refresh-interval');
       if (interval === 0)
@@ -153,7 +183,9 @@ export const Indicator = GObject.registerClass(
     async _refresh() {
       if (this._destroyed || this._refreshInFlight)
         return;
-      if (this._state !== 'signedIn' && this._state !== 'loading')
+      if (this._state !== 'signedIn')
+        return;
+      if (this._settings.get_int('debug-balance') >= 0)
         return;
 
       this._refreshInFlight = true;
@@ -189,8 +221,8 @@ export const Indicator = GObject.registerClass(
           await this._store.clear();
           if (this._destroyed)
             return;
-          this._setError('Session expired. Please sign in again.');
           this._setSignedOut();
+          this._setError('Session expired. Please sign in again.');
         } else {
           this._setError(e.message ?? String(e));
         }
@@ -216,30 +248,45 @@ export const Indicator = GObject.registerClass(
       await this._store.save(this._credentials);
     }
 
+    // Single entry point for pushing current state into the widgets. Screen
+    // visibility follows _state; the visible screen's setters receive the
+    // current data. No actor is ever rebuilt after _init.
+    _applyState() {
+      for (const [name, items] of Object.entries(this._screens))
+        for (const item of items)
+          item.visible = name === this._state;
+
+      if (this._state === 'signedIn') {
+        this._mainScreen.setBalance(this._balance);
+        this._mainScreen.setError(this._lastError);
+        this._mainScreen.setUpdated(this._lastUpdated);
+      } else if (this._state === 'signingIn') {
+        this._signInScreen.setDeviceAuth(this._deviceAuth);
+      }
+      this._renderPanelLabel();
+    }
+
     _onBalance(balance) {
       this._state = 'signedIn';
       this._balance = balance;
       this._lastError = null;
       this._lastUpdated = formatClock(new Date());
-      this._renderPanelLabel();
-      this._rebuildMenu();
+      this._applyState();
       this._maybeNotifyLowBalance(balance);
     }
 
     _setError(message) {
       this._lastError = message;
-      if (this._balance === null)
-        this._numberLabel.text = '!';
-      this._rebuildMenu();
+      this._applyState();
     }
 
     _setSignedOut() {
       this._state = 'signedOut';
       this._credentials = null;
       this._balance = null;
+      this._lastError = null;
       this._stopRefreshLoop();
-      this._renderPanelLabel();
-      this._rebuildMenu();
+      this._applyState();
     }
 
     _renderPanelLabel() {
@@ -247,17 +294,17 @@ export const Indicator = GObject.registerClass(
       const compact = this._settings.get_boolean('compact-numbers');
 
       let text;
-      if (this._state === 'signedOut') {
+      if (this._state !== 'signedIn') {
         text = '--';
       } else if (this._balance === null) {
-        text = '…';
+        text = this._lastError ? '!' : '…';
       } else {
         text = formatBalance(this._balance, compact);
       }
 
       this._numberLabel.text = text;
 
-      this._gemLabel.visible = displayMode !== 'number-only';
+      this._panelGem.visible = displayMode !== 'number-only';
       this._numberLabel.visible = displayMode !== 'gem-only';
     }
 
@@ -286,13 +333,13 @@ export const Indicator = GObject.registerClass(
 
       this._state = 'signingIn';
       this._deviceAuth = null;
-      this._rebuildMenu();
+      this._applyState();
 
       this._deviceFlow = new DeviceFlow(this._client, {
         onUpdate: update => {
           if (update.phase === 'awaiting-user') {
             this._deviceAuth = update.auth;
-            this._rebuildMenu();
+            this._applyState();
           }
         },
       });
@@ -307,6 +354,7 @@ export const Indicator = GObject.registerClass(
             return;
           this._state = 'signedIn';
           this._lowBalanceNotified = false;
+          this._applyState();
           this._startRefreshLoop();
           this._refresh();
         })
@@ -317,11 +365,11 @@ export const Indicator = GObject.registerClass(
             return;
           if (e.code === 'cancelled') {
             this._state = this._credentials ? 'signedIn' : 'signedOut';
+            this._applyState();
           } else {
-            this._state = 'signedOut';
+            this._setSignedOut();
             this._setError(e.message ?? 'Sign-in failed');
           }
-          this._rebuildMenu();
         });
     }
 
@@ -337,258 +385,28 @@ export const Indicator = GObject.registerClass(
       this._setSignedOut();
     }
 
-    _rebuildMenu() {
-      this.menu.removeAll();
+    _openDashboard() {
+      const url = this._client.dashboardUrl(this._credentials?.teamId);
+      this.menu.close();
+      Gio.AppInfo.launch_default_for_uri(url, null);
+    }
 
-      if (this._state === 'signingIn') {
-        this._buildSignInMenu();
+    _copyDeviceCode() {
+      if (!this._deviceAuth)
         return;
-      } else if (this._state === 'signedOut') {
-        this._buildSignedOutMenu();
+      St.Clipboard.get_default().set_text(
+        St.ClipboardType.CLIPBOARD, this._deviceAuth.userCode);
+    }
+
+    _openVerificationUrl() {
+      if (!this._deviceAuth)
         return;
-      }
-
-      const headerItem = new PopupMenu.PopupMenuItem(
-        'Hypercredits Available', { reactive: false, style_class: 'hyper-credits-menu-subtitle' });
-      this.menu.addMenuItem(headerItem);
-
-      const balanceItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const balanceBox = new St.BoxLayout({
-        style_class: 'hyper-credits-menu-balance-box',
-        x_expand: true,
-        y_align: Clutter.ActorAlign.CENTER,
-      });
-      const balanceText = this._balanceText();
-      let labelText = balanceText;
-      if (this._gemFrames.length > 0 && balanceText.startsWith(GEM)) {
-        this._gemIcon = new St.Icon({
-          gicon: this._gemFrames[this._gemFrames.length - 1],
-          icon_size: MENU_GEM_ICON_SIZE,
-          y_align: Clutter.ActorAlign.CENTER,
-        });
-        balanceBox.add_child(this._gemIcon);
-        labelText = balanceText.slice(GEM.length).trimStart();
-      } else {
-        this._gemIcon = null;
-      }
-      const balanceLabel = new St.Label({
-        text: labelText,
-        style_class: 'hyper-credits-menu-balance',
-        x_expand: true,
-        y_align: Clutter.ActorAlign.CENTER,
-      });
-      balanceBox.add_child(balanceLabel);
-      balanceItem.add_child(balanceBox);
-      this.menu.addMenuItem(balanceItem);
-
-      const buttons = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const buttonBox = new St.BoxLayout({ x_expand: true });
-
-      const dashboardButton = new St.Button({
-        label: 'Open Dashboard',
-        style_class: 'hyper-credits-action-button',
-        x_expand: true,
-      });
-      dashboardButton.connect('clicked', () => {
-        const url = this._client.dashboardUrl(this._credentials?.teamId);
-        Gio.AppInfo.launch_default_for_uri(url, null);
-      });
-      buttonBox.add_child(dashboardButton);
-
-      buttons.add_child(buttonBox);
-      this.menu.addMenuItem(buttons);
-
-      if (this._lastError) {
-        const errorItem = new PopupMenu.PopupMenuItem(
-          `⚠ ${this._lastError}`, { reactive: false, style_class: 'hyper-credits-menu-error' });
-        this.menu.addMenuItem(errorItem);
-      }
-
-      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-      this.menu.addMenuItem(this._buildFooter({ refresh: true, signOut: true }));
-    }
-
-    _buildSignedOutMenu() {
-      const headerItem = new PopupMenu.PopupMenuItem(
-        'Not signed in', { reactive: false });
-      this.menu.addMenuItem(headerItem);
-
-      const buttons = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const buttonBox = new St.BoxLayout({ x_expand: true });
-
-      const signInButton = new St.Button({
-        label: 'Sign in',
-        style_class: 'hyper-credits-action-button',
-        x_expand: true,
-      });
-      signInButton.connect('clicked', () => this._startSignIn());
-      buttonBox.add_child(signInButton);
-
-      buttons.add_child(buttonBox);
-      this.menu.addMenuItem(buttons);
-
-      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-      this.menu.addMenuItem(this._buildFooter({ refresh: false, signOut: false }));
-    }
-
-    _buildFooter({ refresh, signOut }) {
-      const footer = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const updatedLabel = new St.Label({
-        text: this._lastUpdated ? `Updated ${this._lastUpdated}` : '',
-        style_class: 'hyper-credits-menu-footer',
-        x_expand: true,
-        y_align: Clutter.ActorAlign.CENTER,
-      });
-      footer.add_child(updatedLabel);
-
-      if (refresh)
-        footer.add_child(this._makeIconButton('view-refresh-symbolic', () => this._refresh()));
-      footer.add_child(this._makeIconButton('emblem-system-symbolic', () => {
-        this.menu.close();
-        this._extension.openPreferences();
-      }));
-
-      if (signOut) {
-        footer.add_child(this._makeIconButton('application-exit-rtl-symbolic', () => {
-          this.menu.close();
-          this._signOut();
-        }));
-      }
-
-      return footer;
-    }
-
-    _balanceText() {
-      if (this._balance === null)
-        return `${GEM} …`;
-      return `${GEM} ${formatBalance(this._balance, false)}`;
-    }
-
-    _loadGemFrames() {
-      const framesDir = this._extension.dir.get_child('gem');
-      const frames = [];
-      for (let i = 1; i <= FRAME_COUNT; i++) {
-        const file = framesDir.get_child(`frame-${String(i).padStart(2, '0')}.png`);
-        if (!file.query_exists(null))
-          return [];
-        frames.push(new Gio.FileIcon({ file }));
-      }
-      return frames;
-    }
-
-    _loadPanelGem() {
-      const file = this._extension.dir.get_child('panel-gem.png');
-      if (file.query_exists(null))
-        return new Gio.FileIcon({ file });
-      return this._gemFrames.length > 0 ? this._gemFrames[0] : null;
-    }
-
-    _spinGemOnce() {
-      this._stopGemSpin();
-      if (!this._gemIcon || this._gemFrames.length === 0)
-        return;
-
-      let index = 0;
-      this._gemIcon.gicon = this._gemFrames[0];
-      this._gemAnimTimerId = GLib.timeout_add(
-        GLib.PRIORITY_DEFAULT, FRAME_DURATION_MS, () => {
-          index += 1;
-          if (index >= this._gemFrames.length) {
-            this._gemAnimTimerId = 0;
-            return GLib.SOURCE_REMOVE;
-          }
-          if (this._gemIcon)
-            this._gemIcon.gicon = this._gemFrames[index];
-          return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    _stopGemSpin() {
-      if (this._gemAnimTimerId) {
-        GLib.Source.remove(this._gemAnimTimerId);
-        this._gemAnimTimerId = 0;
-      }
-    }
-
-    _makeIconButton(iconName, onClicked) {
-      const button = new St.Button({
-        style_class: 'hyper-credits-menu-button',
-        child: new St.Icon({ icon_name: iconName, style_class: 'popup-menu-icon' }),
-      });
-      button.connect('clicked', onClicked);
-      return button;
-    }
-
-    _buildSignInMenu() {
-      if (!this._deviceAuth) {
-        const starting = new PopupMenu.PopupMenuItem(
-          'Starting sign-in…', { reactive: false });
-        this.menu.addMenuItem(starting);
-        return;
-      }
-
-      const header = new PopupMenu.PopupMenuItem(
-        'Authorize this device', { reactive: false, style_class: 'hyper-credits-menu-subtitle' });
-      this.menu.addMenuItem(header);
-
-      const codeItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const codeLabel = new St.Label({
-        text: this._deviceAuth.userCode,
-        style_class: 'hyper-credits-device-code',
-        x_align: Clutter.ActorAlign.CENTER,
-        x_expand: true,
-      });
-      codeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-      codeItem.add_child(codeLabel);
-      this.menu.addMenuItem(codeItem);
-
-      const hint = new PopupMenu.PopupMenuItem(
-        `Open ${this._deviceAuth.verificationUrl} and enter the code.`,
-        { reactive: false, style_class: 'hyper-credits-menu-subtitle' });
-      this.menu.addMenuItem(hint);
-
-      const buttons = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const buttonBox = new St.BoxLayout({ x_expand: true, style_class: 'hyper-credits-device-buttons' });
-
-      const copyButton = new St.Button({
-        label: 'Copy code',
-        style_class: 'hyper-credits-action-button',
-        x_expand: true,
-      });
-      copyButton.connect('clicked', () => {
-        St.Clipboard.get_default().set_text(
-          St.ClipboardType.CLIPBOARD, this._deviceAuth.userCode);
-      });
-      buttonBox.add_child(copyButton);
-
-      const openButton = new St.Button({
-        label: 'Open browser',
-        style_class: 'hyper-credits-action-button',
-        x_expand: true,
-      });
-      openButton.connect('clicked', () => {
-        Gio.AppInfo.launch_default_for_uri(this._deviceAuth.verificationUrl, null);
-      });
-      buttonBox.add_child(openButton);
-
-      buttons.add_child(buttonBox);
-      this.menu.addMenuItem(buttons);
-
-      const waiting = new PopupMenu.PopupMenuItem(
-        'Waiting for authorization…', { reactive: false, style_class: 'hyper-credits-menu-subtitle' });
-      this.menu.addMenuItem(waiting);
-
-      const cancel = new PopupMenu.PopupMenuItem('Cancel');
-      cancel.connect('activate', () => this._cancelSignIn());
-      this.menu.addMenuItem(cancel);
+      Gio.AppInfo.launch_default_for_uri(this._deviceAuth.verificationUrl, null);
     }
 
     _onDestroy() {
       this._destroyed = true;
       this._stopRefreshLoop();
-      this._stopGemSpin();
       this._cancelSignIn();
       if (this._menuOpenSignal) {
         this.menu.disconnect(this._menuOpenSignal);
@@ -598,6 +416,10 @@ export const Indicator = GObject.registerClass(
         for (const id of this._settingsSignals)
           this._settings.disconnect(id);
         this._settingsSignals = null;
+      }
+      if (this._spinner) {
+        this._spinner.destroy();
+        this._spinner = null;
       }
       if (this._client) {
         this._client.destroy();

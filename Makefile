@@ -5,8 +5,11 @@ build: schemas
 	gnome-extensions pack \
 		--force \
 		--extra-source=credentialsStore.js \
+		--extra-source=format.js \
+		--extra-source=gemSpinner.js \
 		--extra-source=hyperClient.js \
 		--extra-source=indicator.js \
+		--extra-source=screens.js \
 		--extra-source=panel-gem.png \
 		--extra-source=gem \
 		./hyper-credits@arnarg/ \
