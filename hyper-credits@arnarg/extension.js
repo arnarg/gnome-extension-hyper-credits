@@ -4,13 +4,13 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import { Indicator } from './indicator.js';
 
 export default class HyperCreditsExtension extends Extension {
-    enable() {
-        this._indicator = new Indicator(this);
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
-    }
+  enable() {
+    this._indicator = new Indicator(this);
+    Main.panel.addToStatusArea(this.uuid, this._indicator);
+  }
 
-    disable() {
-        this._indicator?.destroy();
-        this._indicator = null;
-    }
+  disable() {
+    this._indicator?.destroy();
+    this._indicator = null;
+  }
 }

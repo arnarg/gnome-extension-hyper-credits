@@ -381,6 +381,23 @@ export const Indicator = GObject.registerClass(
       balanceItem.add_child(balanceBox);
       this.menu.addMenuItem(balanceItem);
 
+      const buttons = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
+      const buttonBox = new St.BoxLayout({ x_expand: true });
+
+      const dashboardButton = new St.Button({
+        label: 'Open Dashboard',
+        style_class: 'hyper-credits-action-button',
+        x_expand: true,
+      });
+      dashboardButton.connect('clicked', () => {
+        const url = this._client.dashboardUrl(this._credentials?.teamId);
+        Gio.AppInfo.launch_default_for_uri(url, null);
+      });
+      buttonBox.add_child(dashboardButton);
+
+      buttons.add_child(buttonBox);
+      this.menu.addMenuItem(buttons);
+
       if (this._lastError) {
         const errorItem = new PopupMenu.PopupMenuItem(
           `⚠ ${this._lastError}`, { reactive: false, style_class: 'hyper-credits-menu-error' });
@@ -394,11 +411,11 @@ export const Indicator = GObject.registerClass(
 
     _buildSignedOutMenu() {
       const headerItem = new PopupMenu.PopupMenuItem(
-        'Not signed in', { reactive: false, style_class: 'hyper-credits-menu-subtitle' });
+        'Not signed in', { reactive: false });
       this.menu.addMenuItem(headerItem);
 
       const buttons = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-      const buttonBox = new St.BoxLayout({ x_expand: true, style_class: 'hyper-credits-device-buttons' });
+      const buttonBox = new St.BoxLayout({ x_expand: true });
 
       const signInButton = new St.Button({
         label: 'Sign in',
