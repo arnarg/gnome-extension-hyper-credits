@@ -1,6 +1,5 @@
-.hc-panel-box {
-    spacing: 8px;
-}
+.hc-panel { spacing: 8px; }
+.hc-panel-icon { icon-size: 16px; }
 
 /* Each screen is one non-reactive menu item; this restores the vertical
    rhythm the shell gave us when screens were separate PopupMenuItems. */
@@ -10,6 +9,10 @@
 
 .hc-menu-balance-box {
     spacing: 14px;
+}
+
+.hc-menu-balance-icon {
+    icon-size: 40px;
 }
 
 .hc-menu-balance {

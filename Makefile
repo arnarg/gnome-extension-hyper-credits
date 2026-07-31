@@ -6,7 +6,6 @@ build: schemas
 		--force \
 		--extra-source=credentialsStore.js \
 		--extra-source=format.js \
-		--extra-source=gemSpinner.js \
 		--extra-source=hyperClient.js \
 		--extra-source=indicator.js \
 		--extra-source=screens.js \

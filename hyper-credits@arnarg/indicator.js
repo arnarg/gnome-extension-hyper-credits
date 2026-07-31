@@ -9,12 +9,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 import { HyperClient, DeviceFlow, HyperError } from './hyperClient.js';
 import { CredentialsStore } from './credentialsStore.js';
-import { GemSpinner } from './gemSpinner.js';
-import { buildMainScreen, buildSignedOutScreen, buildSignInScreen } from './screens.js';
+import { MainScreen, SignedOutScreen, SignInScreen } from './screens.js';
 import { formatBalance, formatClock } from './format.js';
-
-const MENU_GEM_ICON_SIZE = 40;
-const PANEL_GEM_ICON_SIZE = 16;
 
 export const Indicator = GObject.registerClass(
   class Indicator extends PanelMenu.Button {
@@ -42,10 +38,10 @@ export const Indicator = GObject.registerClass(
       this._lowBalanceNotified = false;
 
       // ---- panel: built once; only text and visibility ever change ----
-      const box = new St.BoxLayout({ style_class: 'hc-panel-box' });
+      const box = new St.BoxLayout({ style_class: 'hc-panel' });
       this._panelGem = new St.Icon({
         gicon: new Gio.FileIcon({ file: extension.dir.get_child('panel-gem.png') }),
-        icon_size: PANEL_GEM_ICON_SIZE,
+        style_class: 'hc-panel-icon',
         y_align: Clutter.ActorAlign.CENTER,
       });
       this._numberLabel = new St.Label({
@@ -57,24 +53,23 @@ export const Indicator = GObject.registerClass(
       this.add_child(box);
 
       // ---- menu screens: built once, swapped by visibility ----
-      this._spinner = new GemSpinner(extension.dir, MENU_GEM_ICON_SIZE);
       const closeAnd = fn => () => {
         this.menu.close();
         fn();
       };
 
-      this._mainScreen = buildMainScreen({
-        spinner: this._spinner,
+      this._mainScreen = new MainScreen({
+        extension,
         onOpenDashboard: () => this._openDashboard(),
         onRefresh: () => this._refresh(),
         onSignOut: closeAnd(() => this._signOut()),
         onOpenPrefs: closeAnd(() => extension.openPreferences()),
       });
-      this._signedOutScreen = buildSignedOutScreen({
+      this._signedOutScreen = new SignedOutScreen({
         onSignIn: () => this._startSignIn(),
         onOpenPrefs: closeAnd(() => extension.openPreferences()),
       });
-      this._signInScreen = buildSignInScreen({
+      this._signInScreen = new SignInScreen({
         onCopyCode: () => this._copyDeviceCode(),
         onOpenBrowser: () => this._openVerificationUrl(),
         onCancel: () => this._cancelSignIn(),
@@ -116,9 +111,9 @@ export const Indicator = GObject.registerClass(
         if (isOpen && this._settings.get_boolean('refresh-on-menu-open'))
           this._refresh();
         if (isOpen && this._state === 'signedIn')
-          this._spinner.spinOnce();
+          this._mainScreen.spinner.spinOnce();
         else
-          this._spinner.stop();
+          this._mainScreen.spinner.stop();
       });
 
       this.connect('destroy', () => this._onDestroy());
@@ -417,9 +412,9 @@ export const Indicator = GObject.registerClass(
           this._settings.disconnect(id);
         this._settingsSignals = null;
       }
-      if (this._spinner) {
-        this._spinner.destroy();
-        this._spinner = null;
+      if (this._mainScreen) {
+        this._mainScreen.destroy();
+        this._mainScreen = null;
       }
       if (this._client) {
         this._client.destroy();

@@ -1,9 +1,75 @@
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import { GEM, formatBalance } from './format.js';
+
+const FRAME_COUNT = 42;
+const FRAME_DURATION_MS = 66;
+
+// Owns the animated menu gem: frame loading, the icon actor, and the spin
+// timer. The icon lives as long as the main screen, so balance updates never
+// destroy it out from under a running animation.
+class GemSpinner {
+  constructor(dir) {
+    this._frames = this._loadFrames(dir);
+    this._timerId = 0;
+
+    this.icon = this._frames.length > 0
+      ? new St.Icon({
+          gicon: this._frames[this._frames.length - 1],
+          style_class: 'hc-menu-balance-icon',
+          y_align: Clutter.ActorAlign.CENTER,
+        })
+      : null;
+  }
+
+  _loadFrames(dir) {
+    const framesDir = dir.get_child('gem');
+    const frames = [];
+    for (let i = 1; i <= FRAME_COUNT; i++) {
+      const file = framesDir.get_child(`frame-${String(i).padStart(2, '0')}.png`);
+      if (!file.query_exists(null))
+        return [];
+      frames.push(new Gio.FileIcon({ file }));
+    }
+    return frames;
+  }
+
+  spinOnce() {
+    this.stop();
+    if (!this.icon)
+      return;
+    let index = 0;
+    this.icon.gicon = this._frames[0];
+    this._timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, FRAME_DURATION_MS, () => {
+      index += 1;
+      if (index >= this._frames.length) {
+        this._timerId = 0;
+        return GLib.SOURCE_REMOVE;
+      }
+      this.icon.gicon = this._frames[index];
+      return GLib.SOURCE_CONTINUE;
+    });
+  }
+
+  stop() {
+    if (this._timerId) {
+      GLib.Source.remove(this._timerId);
+      this._timerId = 0;
+    }
+  }
+
+  destroy() {
+    this.stop();
+    this.icon?.destroy();
+    this.icon = null;
+    this._frames = [];
+  }
+}
 
 function makeButton(label, onClicked) {
   const button = new St.Button({
@@ -78,111 +144,139 @@ function makeContentItem() {
 // Signed-in credits screen. All updates flow through the three setters; no
 // widget is ever rebuilt after construction. `items` are the menu items to
 // add and visibility-toggle together: content, separator, footer.
-export function buildMainScreen({ spinner, onOpenDashboard, onRefresh, onSignOut, onOpenPrefs }) {
-  const { item, root } = makeContentItem();
+export class MainScreen {
+  constructor({ extension, onOpenDashboard, onRefresh, onSignOut, onOpenPrefs }) {
+    this._spinner = new GemSpinner(extension.dir);
 
-  root.add_child(new St.Label({
-    text: 'Hypercredits Available',
-    style_class: 'hc-menu-subtitle',
-  }));
+    const { item, root } = makeContentItem();
 
-  const balanceBox = new St.BoxLayout({
-    style_class: 'hc-menu-balance-box',
-    x_expand: true,
-    y_align: Clutter.ActorAlign.CENTER,
-  });
-  if (spinner.icon) {
-    balanceBox.add_child(spinner.icon);
-  } else {
-    balanceBox.add_child(new St.Label({ text: GEM, style_class: 'hc-menu-balance' }));
+    root.add_child(new St.Label({
+      text: 'Hypercredits Available',
+      style_class: 'hc-menu-subtitle',
+    }));
+
+    const balanceBox = new St.BoxLayout({
+      style_class: 'hc-menu-balance-box',
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    if (this._spinner.icon) {
+      balanceBox.add_child(this._spinner.icon);
+    } else {
+      balanceBox.add_child(new St.Label({ text: GEM, style_class: 'hc-menu-balance' }));
+    }
+    this._balanceLabel = new St.Label({
+      style_class: 'hc-menu-balance',
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    balanceBox.add_child(this._balanceLabel);
+    root.add_child(balanceBox);
+
+    root.add_child(makeButton('Open Dashboard', onOpenDashboard));
+
+    this._errorLabel = new St.Label({ style_class: 'hc-menu-error', visible: false });
+    root.add_child(this._errorLabel);
+
+    this._footer = buildFooter({ onRefresh, onOpenPrefs, onSignOut });
+
+    this._items = [item, this._footer.separator, this._footer.item];
   }
-  const balanceLabel = new St.Label({
-    style_class: 'hc-menu-balance',
-    x_expand: true,
-    y_align: Clutter.ActorAlign.CENTER,
-  });
-  balanceBox.add_child(balanceLabel);
-  root.add_child(balanceBox);
 
-  root.add_child(makeButton('Open Dashboard', onOpenDashboard));
+  get items() {
+    return this._items;
+  }
 
-  const errorLabel = new St.Label({ style_class: 'hc-menu-error', visible: false });
-  root.add_child(errorLabel);
+  get spinner() {
+    return this._spinner;
+  }
 
-  const footer = buildFooter({ onRefresh, onOpenPrefs, onSignOut });
+  setBalance(balance) {
+    this._balanceLabel.text = balance === null ? '…' : formatBalance(balance, false);
+  }
 
-  return {
-    items: [item, footer.separator, footer.item],
-    setBalance(balance) {
-      balanceLabel.text = balance === null ? '…' : formatBalance(balance, false);
-    },
-    setError(message) {
-      errorLabel.text = message ? `⚠ ${message}` : '';
-      errorLabel.visible = !!message;
-    },
-    setUpdated(clock) {
-      footer.updatedLabel.text = clock ? `Updated ${clock}` : '';
-    },
-  };
+  setError(message) {
+    this._errorLabel.text = message ? `⚠ ${message}` : '';
+    this._errorLabel.visible = !!message;
+  }
+
+  setUpdated(clock) {
+    this._footer.updatedLabel.text = clock ? `Updated ${clock}` : '';
+  }
+
+  destroy() {
+    this._spinner.destroy();
+  }
 }
 
-export function buildSignedOutScreen({ onSignIn, onOpenPrefs }) {
-  const { item, root } = makeContentItem();
+export class SignedOutScreen {
+  constructor({ onSignIn, onOpenPrefs }) {
+    const { item, root } = makeContentItem();
 
-  root.add_child(new St.Label({ text: 'Not signed in' }));
-  root.add_child(makeButton('Sign in', onSignIn));
+    root.add_child(new St.Label({ text: 'Not signed in' }));
+    root.add_child(makeButton('Sign in', onSignIn));
 
-  const footer = buildFooter({ onOpenPrefs });
+    const footer = buildFooter({ onOpenPrefs });
 
-  return { items: [item, footer.separator, footer.item] };
+    this._items = [item, footer.separator, footer.item];
+  }
+
+  get items() {
+    return this._items;
+  }
 }
 
 // Device-flow screen. Everything lives inside one content item, including
 // Cancel, so this screen is a single menu item with no siblings to manage.
-export function buildSignInScreen({ onCopyCode, onOpenBrowser, onCancel }) {
-  const { item, root } = makeContentItem();
+export class SignInScreen {
+  constructor({ onCopyCode, onOpenBrowser, onCancel }) {
+    const { item, root } = makeContentItem();
 
-  const statusLabel = new St.Label({ text: 'Starting sign-in…' });
-  root.add_child(statusLabel);
+    this._statusLabel = new St.Label({ text: 'Starting sign-in…' });
+    root.add_child(this._statusLabel);
 
-  const codeLabel = new St.Label({
-    style_class: 'hc-device-code',
-    x_align: Clutter.ActorAlign.CENTER,
-    x_expand: true,
-    visible: false,
-  });
-  codeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-  root.add_child(codeLabel);
+    this._codeLabel = new St.Label({
+      style_class: 'hc-device-code',
+      x_align: Clutter.ActorAlign.CENTER,
+      x_expand: true,
+      visible: false,
+    });
+    this._codeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    root.add_child(this._codeLabel);
 
-  const hintLabel = new St.Label({ style_class: 'hc-menu-subtitle', visible: false });
-  root.add_child(hintLabel);
+    this._hintLabel = new St.Label({ style_class: 'hc-menu-subtitle', visible: false });
+    root.add_child(this._hintLabel);
 
-  const buttonBox = new St.BoxLayout({
-    x_expand: true,
-    style_class: 'hc-device-buttons',
-    visible: false,
-  });
-  buttonBox.add_child(makeButton('Copy code', onCopyCode));
-  buttonBox.add_child(makeButton('Open browser', onOpenBrowser));
-  root.add_child(buttonBox);
+    this._buttonBox = new St.BoxLayout({
+      x_expand: true,
+      style_class: 'hc-device-buttons',
+      visible: false,
+    });
+    this._buttonBox.add_child(makeButton('Copy code', onCopyCode));
+    this._buttonBox.add_child(makeButton('Open browser', onOpenBrowser));
+    root.add_child(this._buttonBox);
 
-  const cancelButton = makeRowButton('Cancel', onCancel);
-  cancelButton.visible = false;
-  root.add_child(cancelButton);
+    this._cancelButton = makeRowButton('Cancel', onCancel);
+    this._cancelButton.visible = false;
+    root.add_child(this._cancelButton);
 
-  return {
-    items: [item],
-    setDeviceAuth(auth) {
-      const ready = !!auth;
-      statusLabel.text = ready ? 'Waiting for authorization…' : 'Starting sign-in…';
-      codeLabel.visible = ready;
-      hintLabel.visible = ready;
-      buttonBox.visible = ready;
-      cancelButton.visible = ready;
-      if (ready) {
-        codeLabel.text = auth.userCode;
-        hintLabel.text = `Open ${auth.verificationUrl} and enter the code.`;
-      }
-    },
-  };
+    this._items = [item];
+  }
+
+  get items() {
+    return this._items;
+  }
+
+  setDeviceAuth(auth) {
+    const ready = !!auth;
+    this._statusLabel.text = ready ? 'Waiting for authorization…' : 'Starting sign-in…';
+    this._codeLabel.visible = ready;
+    this._hintLabel.visible = ready;
+    this._buttonBox.visible = ready;
+    this._cancelButton.visible = ready;
+    if (ready) {
+      this._codeLabel.text = auth.userCode;
+      this._hintLabel.text = `Open ${auth.verificationUrl} and enter the code.`;
+    }
+  }
 }
