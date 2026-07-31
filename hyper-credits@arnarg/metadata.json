@@ -2,7 +2,7 @@
   "uuid": "hyper-credits@arnarg",
   "name": "Hyper Credits",
   "description": "Shows your remaining Charm Hyper credits in the top bar",
-  "version": 3,
+  "version": 4,
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "settings-schema": "org.gnome.shell.extensions.hyper-credits",
   "url": "https://github.com/arnarg/gnome-extension-hyper-credits"
