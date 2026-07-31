@@ -12,6 +12,11 @@ import { CredentialsStore } from './credentialsStore.js';
 import { MainScreen, SignedOutScreen, SignInScreen } from './screens.js';
 import { formatBalance, formatClock } from './format.js';
 
+// Backoff for the auto-refresh loop: on failure the next delay doubles each
+// time (shift capped so it stays sane), and never exceeds this ceiling.
+const MAX_BACKOFF_SHIFT = 4;
+const MAX_REFRESH_DELAY_SECONDS = 3600;
+
 export const Indicator = GObject.registerClass(
   class Indicator extends PanelMenu.Button {
     _init(extension) {
@@ -36,6 +41,8 @@ export const Indicator = GObject.registerClass(
       this._refreshTimerId = 0;
       this._refreshInFlight = false;
       this._lowBalanceNotified = false;
+      this._tokenRefreshPromise = null;
+      this._consecutiveFailures = 0;
 
       // ---- panel: built once; only text and visibility ever change ----
       const box = new St.BoxLayout({ style_class: 'hc-panel' });
@@ -152,19 +159,31 @@ export const Indicator = GObject.registerClass(
       return true;
     }
 
+    // Self-rescheduling loop: each tick schedules the next, so consecutive
+    // failures can back off exponentially instead of hammering the API on a
+    // fixed cadence. _consecutiveFailures drives the delay and resets on any
+    // successful refresh.
     _startRefreshLoop() {
       this._stopRefreshLoop();
       if (this._state !== 'signedIn')
         return;
       if (this._settings.get_int('debug-balance') >= 0)
         return;
-      const interval = this._settings.get_uint('refresh-interval');
-      if (interval === 0)
+      if (this._settings.get_uint('refresh-interval') === 0)
         return;
+      this._scheduleNextRefresh();
+    }
+
+    _scheduleNextRefresh() {
+      const base = this._settings.get_uint('refresh-interval');
+      const capped = Math.min(this._consecutiveFailures, MAX_BACKOFF_SHIFT);
+      const delay = Math.min(base * 2 ** capped, MAX_REFRESH_DELAY_SECONDS);
       this._refreshTimerId = GLib.timeout_add_seconds(
-        GLib.PRIORITY_DEFAULT, interval, () => {
+        GLib.PRIORITY_DEFAULT, delay, () => {
+          this._refreshTimerId = 0;
           this._refresh();
-          return GLib.SOURCE_CONTINUE;
+          // _refresh reschedules via _scheduleNextRefresh once finished.
+          return GLib.SOURCE_REMOVE;
         });
     }
 
@@ -199,7 +218,13 @@ export const Indicator = GObject.registerClass(
           balance = await this._fetchWithCurrentToken();
         } catch (e) {
           if (e instanceof HyperError && e.code === 'unauthorized') {
-            await this._refreshTokens();
+            // The access token we held was rejected even though it looked
+            // valid: force one refresh and retry once. _refreshTokens() is
+            // single-flight, so this shares any refresh already underway
+            // instead of firing a second exchange with a rotated token.
+            await this._refreshTokens(true);
+            if (this._destroyed)
+              return;
             balance = await this._fetchWithCurrentToken();
           } else {
             throw e;
@@ -208,10 +233,12 @@ export const Indicator = GObject.registerClass(
 
         if (this._destroyed)
           return;
+        this._consecutiveFailures = 0;
         this._onBalance(balance);
       } catch (e) {
         if (this._destroyed)
           return;
+        this._consecutiveFailures += 1;
         if (e instanceof HyperError && e.code === 'unauthorized') {
           await this._store.clear();
           if (this._destroyed)
@@ -223,24 +250,50 @@ export const Indicator = GObject.registerClass(
         }
       } finally {
         this._refreshInFlight = false;
+        // Re-arm the periodic loop after any refresh (timer- or user-
+        // initiated). The next delay reflects the updated failure count, so
+        // a string of errors backs off and a success snaps back to the base
+        // interval.
+        if (!this._destroyed && !this._refreshTimerId)
+          this._startRefreshLoop();
       }
     }
 
     async _fetchWithCurrentToken() {
-      if (!this._store.isAccessValid(this._credentials))
-        await this._refreshTokens();
+      // Refresh first if the access token is expired; a no-op when valid.
+      await this._refreshTokens();
       return this._client.fetchCredits(this._credentials.access);
     }
 
-    async _refreshTokens() {
-      const refreshed = await this._client.exchangeRefreshToken(this._credentials.refresh);
-      this._credentials = {
-        ...this._credentials,
-        access: refreshed.access,
-        refresh: refreshed.refresh,
-        expires: refreshed.expires,
-      };
-      await this._store.save(this._credentials);
+    // Token refresh lives in exactly one place. Concurrent callers share a
+    // single in-flight exchange so an expired-token refresh and a 401-retry
+    // refresh never race to spend the same (possibly rotated) refresh token
+    // twice. Pass force=true to refresh even when the access token still
+    // looks valid (e.g. after the server rejected it with a 401).
+    async _refreshTokens(force = false) {
+      if (!force && this._store.isAccessValid(this._credentials))
+        return;
+      if (this._tokenRefreshPromise)
+        return this._tokenRefreshPromise;
+
+      this._tokenRefreshPromise = (async () => {
+        const refreshed = await this._client.exchangeRefreshToken(this._credentials.refresh);
+        if (this._destroyed)
+          return;
+        this._credentials = {
+          ...this._credentials,
+          access: refreshed.access,
+          refresh: refreshed.refresh,
+          expires: refreshed.expires,
+        };
+        await this._store.save(this._credentials);
+      })();
+
+      try {
+        await this._tokenRefreshPromise;
+      } finally {
+        this._tokenRefreshPromise = null;
+      }
     }
 
     // Single entry point for pushing current state into the widgets. Screen
@@ -391,6 +444,7 @@ export const Indicator = GObject.registerClass(
         return;
       St.Clipboard.get_default().set_text(
         St.ClipboardType.CLIPBOARD, this._deviceAuth.userCode);
+      this._signInScreen.notifyCodeCopied();
     }
 
     _openVerificationUrl() {
@@ -416,9 +470,17 @@ export const Indicator = GObject.registerClass(
         this._mainScreen.destroy();
         this._mainScreen = null;
       }
+      if (this._signInScreen) {
+        this._signInScreen.destroy();
+        this._signInScreen = null;
+      }
       if (this._client) {
         this._client.destroy();
         this._client = null;
+      }
+      if (this._store) {
+        this._store.destroy();
+        this._store = null;
       }
     }
   });

@@ -10,7 +10,10 @@ export function formatBalance(balance, compact) {
 }
 
 export function formatClock(date) {
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
+  // Respect the user's locale (12/24-hour, separators) rather than forcing
+  // zero-padded 24-hour HH:MM.
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }

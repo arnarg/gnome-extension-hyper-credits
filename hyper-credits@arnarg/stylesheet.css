@@ -25,8 +25,13 @@
     font-size: 0.9em;
 }
 
+/* Error row: the symbolic icon takes the theme's own warning/icon color, so
+   no color is forced here and light/dark themes both render it correctly. */
 .hc-menu-error {
-    color: #ff6b6b;
+    spacing: 6px;
+}
+
+.hc-menu-error-text {
     font-size: 0.9em;
 }
 

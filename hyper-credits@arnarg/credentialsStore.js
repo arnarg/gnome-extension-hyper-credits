@@ -5,18 +5,7 @@ import Secret from 'gi://Secret';
 const SERVICE = 'hyper-credits';
 const ACCOUNT = 'oauth';
 const LABEL = 'Charm Hyper OAuth credentials';
-
-let _schema = null;
-
-function getSchema() {
-  if (!_schema) {
-    _schema = new Secret.Schema('land.charm.Hyper.Credentials', Secret.SchemaFlags.NONE, {
-      service: Secret.SchemaAttributeType.STRING,
-      account: Secret.SchemaAttributeType.STRING,
-    });
-  }
-  return _schema;
-}
+const SCHEMA_NAME = 'land.charm.Hyper.Credentials';
 
 const ATTRIBUTES = { service: SERVICE, account: ACCOUNT };
 
@@ -26,9 +15,9 @@ function fallbackPath() {
   ]);
 }
 
-async function secretStore(payload) {
+async function secretStore(schema, payload) {
   return new Promise((resolve, reject) => {
-    Secret.password_store(getSchema(), ATTRIBUTES, Secret.COLLECTION_DEFAULT,
+    Secret.password_store(schema, ATTRIBUTES, Secret.COLLECTION_DEFAULT,
       LABEL, payload, null, (_source, result) => {
         try {
           Secret.password_store_finish(result);
@@ -40,9 +29,9 @@ async function secretStore(payload) {
   });
 }
 
-async function secretLookup() {
+async function secretLookup(schema) {
   return new Promise((resolve, reject) => {
-    Secret.password_lookup(getSchema(), ATTRIBUTES, null, (_source, result) => {
+    Secret.password_lookup(schema, ATTRIBUTES, null, (_source, result) => {
       try {
         resolve(Secret.password_lookup_finish(result));
       } catch (e) {
@@ -52,9 +41,9 @@ async function secretLookup() {
   });
 }
 
-async function secretClear() {
+async function secretClear(schema) {
   return new Promise((resolve, reject) => {
-    Secret.password_clear(getSchema(), ATTRIBUTES, null, (_source, result) => {
+    Secret.password_clear(schema, ATTRIBUTES, null, (_source, result) => {
       try {
         resolve(Secret.password_clear_finish(result));
       } catch (e) {
@@ -156,15 +145,26 @@ function deserialize(payload) {
 }
 
 export class CredentialsStore {
+  // Constructed only from Indicator, which lives for the duration of
+  // enable(); the Secret.Schema GObject is therefore never created at module
+  // scope and is released in destroy().
   constructor() {
+    this._schema = new Secret.Schema(SCHEMA_NAME, Secret.SchemaFlags.NONE, {
+      service: Secret.SchemaAttributeType.STRING,
+      account: Secret.SchemaAttributeType.STRING,
+    });
     this._useSecret = true;
+  }
+
+  destroy() {
+    this._schema = null;
   }
 
   async save(credentials) {
     const payload = serialize(credentials);
     if (this._useSecret) {
       try {
-        await secretStore(payload);
+        await secretStore(this._schema, payload);
         return;
       } catch (e) {
         log(`hyper-credits: libsecret unavailable, using file fallback: ${e.message}`);
@@ -177,7 +177,7 @@ export class CredentialsStore {
   async load() {
     if (this._useSecret) {
       try {
-        const payload = await secretLookup();
+        const payload = await secretLookup(this._schema);
         if (payload)
           return deserialize(payload);
       } catch (e) {
@@ -196,7 +196,7 @@ export class CredentialsStore {
   async clear() {
     if (this._useSecret) {
       try {
-        await secretClear();
+        await secretClear(this._schema);
       } catch (e) {
         log(`hyper-credits: libsecret clear failed: ${e.message}`);
       }

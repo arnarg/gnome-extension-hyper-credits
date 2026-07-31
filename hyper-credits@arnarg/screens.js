@@ -20,10 +20,10 @@ class GemSpinner {
 
     this.icon = this._frames.length > 0
       ? new St.Icon({
-          gicon: this._frames[this._frames.length - 1],
-          style_class: 'hc-menu-balance-icon',
-          y_align: Clutter.ActorAlign.CENTER,
-        })
+        gicon: this._frames[this._frames.length - 1],
+        style_class: 'hc-menu-balance-icon',
+        y_align: Clutter.ActorAlign.CENTER,
+      })
       : null;
   }
 
@@ -129,9 +129,11 @@ function buildFooter({ onRefresh = null, onOpenPrefs, onSignOut = null }) {
 
 // Each screen's content is one non-reactive menu item wrapping a vertical
 // box. The 'hc-screen' class restores the spacing the shell used to provide
-// when rows were separate PopupMenuItems.
+// when rows were separate PopupMenuItems. It is focusable (but not reactive,
+// so it never acts as a clickable item) so keyboard navigation and screen
+// readers can reach the balance and device code.
 function makeContentItem() {
-  const item = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
+  const item = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: true });
   const root = new St.BoxLayout({
     vertical: true,
     x_expand: true,
@@ -169,14 +171,31 @@ export class MainScreen {
       style_class: 'hc-menu-balance',
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
+      accessible_name: 'Credit balance',
     });
     balanceBox.add_child(this._balanceLabel);
     root.add_child(balanceBox);
 
     root.add_child(makeButton('Open Dashboard', onOpenDashboard));
 
-    this._errorLabel = new St.Label({ style_class: 'hc-menu-error', visible: false });
-    root.add_child(this._errorLabel);
+    // Error row: a symbolic warning icon (inherits the theme's icon color
+    // instead of a hardcoded red) beside the message, in one hidden box.
+    this._errorBox = new St.BoxLayout({
+      style_class: 'hc-menu-error',
+      visible: false,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._errorBox.add_child(new St.Icon({
+      icon_name: 'dialog-warning-symbolic',
+      style_class: 'hc-menu-error-icon popup-menu-icon',
+      y_align: Clutter.ActorAlign.CENTER,
+    }));
+    this._errorLabel = new St.Label({
+      style_class: 'hc-menu-error-text',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._errorBox.add_child(this._errorLabel);
+    root.add_child(this._errorBox);
 
     this._footer = buildFooter({ onRefresh, onOpenPrefs, onSignOut });
 
@@ -196,8 +215,8 @@ export class MainScreen {
   }
 
   setError(message) {
-    this._errorLabel.text = message ? `⚠ ${message}` : '';
-    this._errorLabel.visible = !!message;
+    this._errorLabel.text = message ?? '';
+    this._errorBox.visible = !!message;
   }
 
   setUpdated(clock) {
@@ -240,8 +259,11 @@ export class SignInScreen {
       x_align: Clutter.ActorAlign.CENTER,
       x_expand: true,
       visible: false,
+      accessible_name: 'Sign-in code',
     });
     this._codeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    // Let the code be selected so it can be copied without a mouse.
+    this._codeLabel.clutter_text.selectable = true;
     root.add_child(this._codeLabel);
 
     this._hintLabel = new St.Label({ style_class: 'hc-menu-subtitle', visible: false });
@@ -252,7 +274,13 @@ export class SignInScreen {
       style_class: 'hc-device-buttons',
       visible: false,
     });
-    this._buttonBox.add_child(makeButton('Copy code', onCopyCode));
+    // Equal 50/50 widths regardless of label length: homogeneous gives every
+    // child the same share, so the copy button doesn't shrink when its label
+    // briefly changes to the shorter "Copied!". Set it on the layout manager
+    // (Clutter.BoxLayout) directly, the documented owner of the property.
+    this._buttonBox.layout_manager.homogeneous = true;
+    this._copyButton = makeButton('Copy code', onCopyCode);
+    this._buttonBox.add_child(this._copyButton);
     this._buttonBox.add_child(makeButton('Open browser', onOpenBrowser));
     root.add_child(this._buttonBox);
 
@@ -260,11 +288,34 @@ export class SignInScreen {
     this._cancelButton.visible = false;
     root.add_child(this._cancelButton);
 
+    this._copiedTimerId = 0;
+
     this._items = [item];
   }
 
   get items() {
     return this._items;
+  }
+
+  // Briefly relabel the copy button to confirm the clipboard write, since
+  // the action otherwise gives no visual feedback inside the menu.
+  notifyCodeCopied() {
+    if (this._copiedTimerId)
+      GLib.Source.remove(this._copiedTimerId);
+    this._copyButton.label = 'Copied!';
+    this._copiedTimerId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT, 1500, () => {
+        this._copiedTimerId = 0;
+        this._copyButton.label = 'Copy code';
+        return GLib.SOURCE_REMOVE;
+      });
+  }
+
+  destroy() {
+    if (this._copiedTimerId) {
+      GLib.Source.remove(this._copiedTimerId);
+      this._copiedTimerId = 0;
+    }
   }
 
   setDeviceAuth(auth) {

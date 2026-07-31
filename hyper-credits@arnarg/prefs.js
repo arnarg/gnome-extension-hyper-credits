@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -16,6 +17,11 @@ const DISPLAY_MODES = [
   { label: 'Gem only', value: 'gem-only' },
   { label: 'Number only', value: 'number-only' },
 ];
+
+// Idle delay before committing the API base URL entry. The row emits
+// 'changed' on every keystroke; committing each one would tear down and
+// rebuild the extension's HTTP session (and refetch) per character.
+const URL_COMMIT_DELAY_MS = 600;
 
 export default class HyperCreditsPreferences extends ExtensionPreferences {
   fillPreferencesWindow(window) {
@@ -142,8 +148,33 @@ export default class HyperCreditsPreferences extends ExtensionPreferences {
       title: 'API base URL',
     });
     urlRow.text = settings.get_string('api-base-url');
+
+    // Debounce: reset a short timer on each keystroke and commit the trimmed
+    // text only once typing pauses, so a single settings change (and thus a
+    // single session rebuild + refetch) happens per edit, not per character.
+    let commitTimerId = 0;
+    const commitUrl = () => {
+      commitTimerId = 0;
+      const value = urlRow.text.trim();
+      if (value !== settings.get_string('api-base-url'))
+        settings.set_string('api-base-url', value);
+      return GLib.SOURCE_REMOVE;
+    };
     urlRow.connect('changed', () => {
-      settings.set_string('api-base-url', urlRow.text.trim());
+      if (commitTimerId)
+        GLib.Source.remove(commitTimerId);
+      commitTimerId = GLib.timeout_add(
+        GLib.PRIORITY_DEFAULT, URL_COMMIT_DELAY_MS, commitUrl);
+    });
+    // Flush any pending edit when the row is hidden (window closed or page
+    // switched) so a fast final keystroke isn't lost. Use 'unmap' rather than
+    // 'destroy': the text is still readable here, unlike during disposal.
+    urlRow.connect('unmap', () => {
+      if (commitTimerId) {
+        GLib.Source.remove(commitTimerId);
+        commitTimerId = 0;
+        commitUrl();
+      }
     });
     group.add(urlRow);
   }
