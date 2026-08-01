@@ -167,7 +167,7 @@ export class CredentialsStore {
         await secretStore(this._schema, payload);
         return;
       } catch (e) {
-        log(`hyper-credits: libsecret unavailable, using file fallback: ${e.message}`);
+        console.debug(`hyper-credits: libsecret unavailable, using file fallback: ${e.message}`);
         this._useSecret = false;
       }
     }
@@ -181,14 +181,14 @@ export class CredentialsStore {
         if (payload)
           return deserialize(payload);
       } catch (e) {
-        log(`hyper-credits: libsecret lookup failed, trying file: ${e.message}`);
+        console.debug(`hyper-credits: libsecret lookup failed, trying file: ${e.message}`);
         this._useSecret = false;
       }
     }
     try {
       return deserialize(await fileLookup());
     } catch (e) {
-      log(`hyper-credits: credential file read failed: ${e.message}`);
+      console.debug(`hyper-credits: credential file read failed: ${e.message}`);
       return null;
     }
   }
@@ -198,7 +198,7 @@ export class CredentialsStore {
       try {
         await secretClear(this._schema);
       } catch (e) {
-        log(`hyper-credits: libsecret clear failed: ${e.message}`);
+        console.debug(`hyper-credits: libsecret clear failed: ${e.message}`);
       }
     }
     try {

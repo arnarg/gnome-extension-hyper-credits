@@ -36,7 +36,6 @@ export const Indicator = GObject.registerClass(
       this._lastUpdated = null;
       this._deviceFlow = null;
       this._deviceAuth = null;
-      this._destroyed = false;
 
       this._refreshTimerId = 0;
       this._refreshInFlight = false;
@@ -123,8 +122,6 @@ export const Indicator = GObject.registerClass(
           this._mainScreen.spinner.stop();
       });
 
-      this.connect('destroy', () => this._onDestroy());
-
       this._initialize();
     }
 
@@ -135,7 +132,7 @@ export const Indicator = GObject.registerClass(
         return;
 
       this._credentials = await this._store.load();
-      if (this._destroyed)
+      if (!this._settings)
         return;
       if (this._credentials) {
         this._state = 'signedIn';
@@ -178,6 +175,7 @@ export const Indicator = GObject.registerClass(
       const base = this._settings.get_uint('refresh-interval');
       const capped = Math.min(this._consecutiveFailures, MAX_BACKOFF_SHIFT);
       const delay = Math.min(base * 2 ** capped, MAX_REFRESH_DELAY_SECONDS);
+      this._stopRefreshLoop();
       this._refreshTimerId = GLib.timeout_add_seconds(
         GLib.PRIORITY_DEFAULT, delay, () => {
           this._refreshTimerId = 0;
@@ -195,7 +193,7 @@ export const Indicator = GObject.registerClass(
     }
 
     async _refresh() {
-      if (this._destroyed || this._refreshInFlight)
+      if (!this._client || this._refreshInFlight)
         return;
       if (this._state !== 'signedIn')
         return;
@@ -206,7 +204,7 @@ export const Indicator = GObject.registerClass(
       try {
         if (!this._credentials)
           this._credentials = await this._store.load();
-        if (this._destroyed)
+        if (!this._client)
           return;
         if (!this._credentials) {
           this._setSignedOut();
@@ -223,7 +221,7 @@ export const Indicator = GObject.registerClass(
             // single-flight, so this shares any refresh already underway
             // instead of firing a second exchange with a rotated token.
             await this._refreshTokens(true);
-            if (this._destroyed)
+            if (!this._client)
               return;
             balance = await this._fetchWithCurrentToken();
           } else {
@@ -231,17 +229,17 @@ export const Indicator = GObject.registerClass(
           }
         }
 
-        if (this._destroyed)
+        if (!this._client)
           return;
         this._consecutiveFailures = 0;
         this._onBalance(balance);
       } catch (e) {
-        if (this._destroyed)
+        if (!this._client)
           return;
         this._consecutiveFailures += 1;
         if (e instanceof HyperError && e.code === 'unauthorized') {
           await this._store.clear();
-          if (this._destroyed)
+          if (!this._client)
             return;
           this._setSignedOut();
           this._setError('Session expired. Please sign in again.');
@@ -254,7 +252,7 @@ export const Indicator = GObject.registerClass(
         // initiated). The next delay reflects the updated failure count, so
         // a string of errors backs off and a success snaps back to the base
         // interval.
-        if (!this._destroyed && !this._refreshTimerId)
+        if (this._client && !this._refreshTimerId)
           this._startRefreshLoop();
       }
     }
@@ -278,7 +276,7 @@ export const Indicator = GObject.registerClass(
 
       this._tokenRefreshPromise = (async () => {
         const refreshed = await this._client.exchangeRefreshToken(this._credentials.refresh);
-        if (this._destroyed)
+        if (!this._store)
           return;
         this._credentials = {
           ...this._credentials,
@@ -398,7 +396,7 @@ export const Indicator = GObject.registerClass(
           this._deviceAuth = null;
           this._credentials = credentials;
           await this._store.save(credentials);
-          if (this._destroyed)
+          if (!this._settings)
             return;
           this._state = 'signedIn';
           this._lowBalanceNotified = false;
@@ -409,7 +407,7 @@ export const Indicator = GObject.registerClass(
         .catch(e => {
           this._deviceFlow = null;
           this._deviceAuth = null;
-          if (this._destroyed)
+          if (!this._settings)
             return;
           if (e.code === 'cancelled') {
             this._state = this._credentials ? 'signedIn' : 'signedOut';
@@ -428,7 +426,7 @@ export const Indicator = GObject.registerClass(
     async _signOut() {
       this._cancelSignIn();
       await this._store.clear();
-      if (this._destroyed)
+      if (!this._settings)
         return;
       this._setSignedOut();
     }
@@ -453,8 +451,7 @@ export const Indicator = GObject.registerClass(
       Gio.AppInfo.launch_default_for_uri(this._deviceAuth.verificationUrl, null);
     }
 
-    _onDestroy() {
-      this._destroyed = true;
+    destroy() {
       this._stopRefreshLoop();
       this._cancelSignIn();
       if (this._menuOpenSignal) {
@@ -466,6 +463,7 @@ export const Indicator = GObject.registerClass(
           this._settings.disconnect(id);
         this._settingsSignals = null;
       }
+      this._settings = null;
       if (this._mainScreen) {
         this._mainScreen.destroy();
         this._mainScreen = null;
@@ -482,5 +480,6 @@ export const Indicator = GObject.registerClass(
         this._store.destroy();
         this._store = null;
       }
+      super.destroy();
     }
   });

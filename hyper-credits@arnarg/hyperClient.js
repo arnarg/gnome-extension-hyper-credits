@@ -281,6 +281,7 @@ export class DeviceFlow {
   }
 
   _sleep(ms) {
+    this._clearTimer();
     return new Promise((resolve, reject) => {
       this._rejectSleep = reject;
       this._timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(ms), () => {
